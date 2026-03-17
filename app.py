@@ -19,7 +19,7 @@ async def search_keyword_async(keyword):
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.post(url, data=data, headers=headers, timeout=10.0)
-             resp.encoding = 'big5' 
+            resp.encoding = 'big5' 
         # ----------------
         
         # 為了除錯，我們可以把解碼後的文字先印出來檢查
