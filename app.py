@@ -40,21 +40,13 @@ async def search_keyword_async(keyword):
                 text = block.get_text(separator=" ").strip()
                 
                 # 過濾：必須包含年份(202)，且不能是網站底部的版權宣告(Copyright)
-                if "202" in text and "Copyright" not in text and len(text) > 10:
+                if "202" in text and "Copyright" not in text and 10 < len(text) < 300:
                     match = pattern.search(text)
                     if match:
                         results.append({
                             '序號': match.group(1),
                             '內容': match.group(2).strip(),
                             '日期': match.group(3).strip(),
-                            '關鍵字': keyword
-                        })
-                    else:
-                        # 如果格式長得不一樣但有日期，我們也強制保留下來以免漏掉
-                        results.append({
-                            '序號': '-',
-                            '內容': text,
-                            '日期': '格式需手動確認',
                             '關鍵字': keyword
                         })
                         
