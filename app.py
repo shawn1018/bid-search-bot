@@ -21,8 +21,8 @@ async def search_keyword_async(keyword):
             # 發送請求
             resp = await client.post(url, data=data, headers=headers, timeout=15.0)
             
-            # 【關鍵】：強制使用 big5 解碼，解決所有的問號亂碼
-            resp.encoding = 'big5'
+            # 【關鍵】：強制使用utf-8 解碼，解決所有的問號亂碼
+            resp.encoding = 'utf-8'
             
             # 使用 BeautifulSoup 解析 HTML，把雜亂的標籤清掉
             soup = BeautifulSoup(resp.text, 'html.parser')
