@@ -7,8 +7,8 @@ import nest_asyncio
 
 # 1. 確保雲端環境安裝 Playwright 瀏覽器
 try:
+    # 我們只安裝瀏覽器，不執行 install-deps
     subprocess.run(["playwright", "install", "chromium"], check=True)
-    subprocess.run(["playwright", "install-deps", "chromium"], check=True)
 except Exception as e:
     st.error(f"瀏覽器安裝失敗: {e}")
 
