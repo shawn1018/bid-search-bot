@@ -1,0 +1,5 @@
+__pycache__/
+*.xlsx
+.DS_Store
+venv/
+.venv/
