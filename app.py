@@ -11,6 +11,20 @@ import pandas as pd
 import re
 from playwright.async_api import async_playwright
 import nest_asyncio
+import os
+import subprocess
+
+# 強制在部署環境安裝 Playwright 瀏覽器
+try:
+    subprocess.run(["playwright", "install", "chromium"], check=True)
+    print("Playwright Chromium installed successfully.")
+except Exception as e:
+    print(f"Failed to install Playwright: {e}")
+
+
+
+
+
 
 nest_asyncio.apply()
 
