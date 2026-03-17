@@ -66,7 +66,15 @@ if st.button("開始搜尋"):
         async def run_all():
             async with async_playwright() as p:
                 # 雲端必須使用 headless 模式
-                browser = await p.chromium.launch(headless=True)
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu"
+                    ]
+                )
                 page = await browser.new_page()
                 for i, kw in enumerate(keywords):
                     data = await search_keyword(page, kw)
