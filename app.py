@@ -116,14 +116,12 @@ if st.session_state.df is not None and not st.session_state.df.empty:
     st.markdown("---")
     st.subheader("🤖 一鍵發送至 LINE 機器人")
     
-    # 讓使用者輸入兩把鑰匙
-    line_token = st.text_input("請輸入 Channel Access Token (長亂碼):", type="password")
-    user_id = st.text_input("請輸入你的 User ID (U開頭):", type="password")
-    
     if st.button("🚀 傳送標案結果到我的 LINE"):
-        if not line_token or not user_id:
-            st.warning("請先輸入 Token 與 User ID！")
-        else:
+        try:
+            # 從 Streamlit 保險箱自動讀取金鑰
+            line_token = st.secrets["LINE_TOKEN"]
+            user_id = st.secrets["USER_ID"]
+            
             # 1. 整理訊息內容 (取前 15 筆避免洗版)
             msg = f"\n🔍 標案搜尋結果 (共 {len(df)} 筆)：\n"
             msg += "-" * 20 + "\n"
@@ -150,15 +148,16 @@ if st.session_state.df is not None and not st.session_state.df.empty:
                 ]
             }
             
-            try:
-                # 使用 httpx 的同步模式發送請求給 LINE
-                with httpx.Client() as client:
-                    r = client.post(url, headers=headers, json=payload)
-                    if r.status_code == 200:
-                        st.success("✅ 成功發送到 LINE 囉！請檢查你的手機。")
-                        st.balloons()
-                    else:
-                        st.error(f"❌ 發送失敗！錯誤碼: {r.status_code}")
-                        st.write(r.text) # 顯示詳細錯誤原因方便除錯
-            except Exception as e:
-                st.error(f"連線至 LINE 伺服器發生錯誤: {e}")
+            # 發送請求
+            with httpx.Client() as client:
+                r = client.post(url, headers=headers, json=payload)
+                if r.status_code == 200:
+                    st.success("✅ 成功發送到 LINE 囉！請檢查你的手機。")
+                    st.balloons()
+                else:
+                    st.error(f"❌ 發送失敗！錯誤碼: {r.status_code}")
+                    st.write(r.text)
+        except KeyError:
+            st.error("❌ 找不到金鑰！請確定你有在 Streamlit Secrets 裡面設定 LINE_TOKEN 和 USER_ID。")
+        except Exception as e:
+            st.error(f"發生錯誤: {e}")
