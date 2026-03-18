@@ -83,17 +83,26 @@ if st.button("開始搜尋"):
                 
         if all_data:
             df = pd.DataFrame(all_data)
-            # 去除重複的標案 (根據內容欄位)
+            
+            # 【關鍵修改】：將日期字串轉換為真正的日期格式，方便排序
+            # 我們先用正規表達式提取日期部分（避免“更新”等字眼干擾）
+            df['日期_tmp'] = pd.to_datetime(df['日期'].str.extract(r'(\d{4}/\d{1,2}/\d{1,2})')[0], errors='coerce')
+            
+            # 依照日期排序：ascending=False 代表由新到舊
+            df = df.sort_values(by='日期_tmp', ascending=False)
+            
+            # 去除重複（保留日期最新的那一筆）
             df = df.drop_duplicates(subset=['內容'], keep='first')
-            # 重新整理序號
+            
+            # 重新編排序號 (1, 2, 3...)
             df = df.reset_index(drop=True)
             df['序號'] = df.index + 1
             
+            # 移除暫時的日期排序欄位，保持畫面乾淨
+            df = df.drop(columns=['日期_tmp'])
+            
             # 將結果存入暫存
             st.session_state.df = df
-        else:
-            st.session_state.df = pd.DataFrame() # 存入空表格代表沒資料
-            st.error("沒有抓到符合格式的資料，請檢查關鍵字。")
 
 # --- 結果顯示與 LINE 發送區塊 ---
 # 只要暫存裡面有資料，就把結果跟 LINE 按鈕顯示出來
