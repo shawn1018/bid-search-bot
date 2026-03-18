@@ -69,37 +69,39 @@ def main():
         all_data.extend(data)
         
     # 3. 整理與發送 LINE
-    if all_data:
-        df = pd.DataFrame(all_data)
-        df = df.drop_duplicates(subset=['內容'], keep='first')
-        
-        # 【關鍵】：從 GitHub 的環境變數讀取金鑰
-        line_token = os.environ.get("LINE_TOKEN")
-        user_id = os.environ.get("USER_ID")
-        
-        if not line_token or not user_id:
-            print("錯誤：找不到 LINE 金鑰，無法發送！")
-            return
+        if all_data:
+            df = pd.DataFrame(all_data)
+            df = df.drop_duplicates(subset=['內容'], keep='first')
             
-        msg = f"\n🤖 【每日自動推播】標案搜尋結果 (共 {len(df)} 筆)：\n"
-        msg += "-" * 20 + "\n"
-        for index, row in df.head(15).iterrows():
-            msg += f"📌 {row['內容']}\n📅 {row['日期']} | 🔑 {row['關鍵字']}\n\n"
-        if len(df) > 15:
-            msg += f"...等其他 {len(df)-15} 筆，請至系統查看。"
+            line_token = os.environ.get("LINE_TOKEN")
+            user_id = os.environ.get("USER_ID")
+            
+            # --- 全量發送邏輯：每 20 筆分裝成一則訊息 ---
+            batch_size = 20  # 每 20 筆傳一則訊息，避免字數過長
+            total_bids = len(df)
+            
+            for i in range(0, total_bids, batch_size):
+                chunk = df.iloc[i:i+batch_size]
+                
+                msg = f"\n🔍 標案搜尋結果 ({i+1}~{min(i+batch_size, total_bids)} 筆 / 共 {total_bids} 筆)：\n"
+                msg += "-" * 20 + "\n"
+                
+                for index, row in chunk.iterrows():
+                    msg += f"📌 {row['內容']}\n📅 {row['日期']} | 🔑 {row['關鍵字']}\n\n"
 
-        url = "https://api.line.me/v2/bot/message/push"
-        headers = {"Authorization": f"Bearer {line_token}", "Content-Type": "application/json"}
-        payload = {"to": user_id, "messages":[{"type": "text", "text": msg}]}
-        
-        with httpx.Client() as client:
-            r = client.post(url, headers=headers, json=payload)
-            if r.status_code == 200:
-                print("✅ 成功發送 LINE 通知！")
-            else:
-                print(f"❌ LINE 發送失敗: {r.text}")
-    else:
-        print("今日無符合關鍵字的標案。")
+                # 發送這批訊息
+                url = "https://api.line.me/v2/bot/message/push"
+                headers = {"Authorization": f"Bearer {line_token}", "Content-Type": "application/json"}
+                payload = {"to": user_id, "messages":[{"type": "text", "text": msg}]}
+                
+                with httpx.Client() as client:
+                    r = client.post(url, headers=headers, json=payload)
+                    if r.status_code == 200:
+                        print(f"✅ 成功發送第 {i+1} 批資料")
+                    else:
+                        print(f"❌ 第 {i+1} 批發送失敗: {r.text}")
+        else:
+            print("今日無符合關鍵字的標案。")
 
 if __name__ == "__main__":
     main()
