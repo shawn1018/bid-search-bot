@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Mar 17 14:25:16 2026
-
-@author: shawn
-"""
 import os
 import httpx
 import pandas as pd
@@ -12,7 +5,7 @@ import re
 import asyncio
 from bs4 import BeautifulSoup
 
-# --- 核心搜尋邏輯 (與網頁版相同) ---
+# --- 1. 核心搜尋邏輯 (抓取單一關鍵字) ---
 async def search_keyword_async(keyword):
     url = "https://www.taiwanbuying.com.tw/Query_KeywordAction.ASP"
     headers = {
@@ -27,7 +20,7 @@ async def search_keyword_async(keyword):
             resp.encoding = 'utf-8'
             soup = BeautifulSoup(resp.text, 'html.parser')
             
-            results =[]
+            results = []
             blocks = soup.find_all(['tr', 'li'])
             pattern = re.compile(r'(\d+)\.?\s*(.*?)\s*\((.*?)\)')
             
@@ -37,7 +30,6 @@ async def search_keyword_async(keyword):
                     match = pattern.search(text)
                     if match:
                         results.append({
-                            '序號': match.group(1),
                             '內容': match.group(2).strip(),
                             '日期': match.group(3).strip(),
                             '關鍵字': keyword
@@ -45,63 +37,75 @@ async def search_keyword_async(keyword):
             return results
         except Exception as e:
             print(f"搜尋 '{keyword}' 發生錯誤: {e}")
-            return[]
+            return []
 
-# --- 自動化主程式 ---
+# --- 2. 主程式 ---
 def main():
-    print("啟動自動化標案搜尋機器人...")
+    print("🚀 啟動自動化標案搜尋機器人...")
     
-    # 1. 讀取關鍵字 (從你原本的 keywords.txt)
+    # 讀取關鍵字檔案
     try:
         with open("keywords.txt", "r", encoding="utf-8") as f:
             keywords = [line.strip() for line in f if line.strip()]
     except:
-        print("找不到 keywords.txt，終止執行。")
+        print("❌ 找不到 keywords.txt")
         return
 
-    # 2. 執行搜尋
+    # 【第一步：全部搜完】
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    all_data =[]
+    all_raw_data = []
     for kw in keywords:
-        print(f"正在搜尋: {kw}...")
+        print(f"正在搜尋關鍵字: {kw}")
         data = loop.run_until_complete(search_keyword_async(kw))
-        all_data.extend(data)
-        
-    # 3. 整理與發送 LINE
-        if all_data:
-            df = pd.DataFrame(all_data)
-            df = df.drop_duplicates(subset=['內容'], keep='first')
-            
-            line_token = os.environ.get("LINE_TOKEN")
-            user_id = os.environ.get("USER_ID")
-            
-            # --- 全量發送邏輯：每 20 筆分裝成一則訊息 ---
-            batch_size = 20  # 每 20 筆傳一則訊息，避免字數過長
-            total_bids = len(df)
-            
-            for i in range(0, total_bids, batch_size):
-                chunk = df.iloc[i:i+batch_size]
-                
-                msg = f"\n🔍 標案搜尋結果 ({i+1}~{min(i+batch_size, total_bids)} 筆 / 共 {total_bids} 筆)：\n"
-                msg += "-" * 20 + "\n"
-                
-                for index, row in chunk.iterrows():
-                    msg += f"📌 {row['內容']}\n📅 {row['日期']} | 🔑 {row['關鍵字']}\n\n"
+        all_raw_data.extend(data)
+    
+    # 【第二步：刪除重複與整理】
+    if not all_raw_data:
+        print("今日無符合資料。")
+        return
 
-                # 發送這批訊息
-                url = "https://api.line.me/v2/bot/message/push"
-                headers = {"Authorization": f"Bearer {line_token}", "Content-Type": "application/json"}
-                payload = {"to": user_id, "messages":[{"type": "text", "text": msg}]}
-                
-                with httpx.Client() as client:
-                    r = client.post(url, headers=headers, json=payload)
-                    if r.status_code == 200:
-                        print(f"✅ 成功發送第 {i+1} 批資料")
-                    else:
-                        print(f"❌ 第 {i+1} 批發送失敗: {r.text}")
-        else:
-            print("今日無符合關鍵字的標案。")
+    df = pd.DataFrame(all_raw_data)
+    df = df.drop_duplicates(subset=['內容'], keep='first').reset_index(drop=True)
+    total_bids = len(df)
+    print(f"搜尋結束，共找到 {total_bids} 筆不重複標案。")
+
+    # 【第三步：分批發送 LINE (這段必須在關鍵字迴圈外面)】
+    line_token = os.environ.get("LINE_TOKEN")
+    user_id = os.environ.get("USER_ID")
+    
+    if not line_token or not user_id:
+        print("❌ 找不到 LINE 金鑰。")
+        return
+
+    # 每 15 筆分裝成一則訊息，避免字數過長
+    batch_size = 15 
+    for i in range(0, total_bids, batch_size):
+        chunk = df.iloc[i:i+batch_size]
+        
+        msg = f"\n🔍 標案搜尋結果 ({i+1}~{min(i+batch_size, total_bids)} / 共 {total_bids} 筆)：\n"
+        msg += "-" * 20 + "\n"
+        
+        for index, row in chunk.iterrows():
+            msg += f"📌 {row['內容']}\n📅 {row['日期']} | 🔑 {row['關鍵字']}\n\n"
+
+        # 發送當前這一批
+        url = "https://api.line.me/v2/bot/message/push"
+        headers = {
+            "Authorization": f"Bearer {line_token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "to": user_id,
+            "messages": [{"type": "text", "text": msg}]
+        }
+        
+        with httpx.Client() as client:
+            r = client.post(url, headers=headers, json=payload)
+            if r.status_code == 200:
+                print(f"✅ 成功發送第 {i+1} 批次")
+            else:
+                print(f"❌ 第 {i+1} 批次發送失敗: {r.text}")
 
 if __name__ == "__main__":
     main()
