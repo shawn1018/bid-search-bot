@@ -60,15 +60,25 @@ def main():
         data = loop.run_until_complete(search_keyword_async(kw))
         all_raw_data.extend(data)
     
-    # 【第二步：刪除重複與整理】
+    # 【第二步：整理、排序與去重】
     if not all_raw_data:
         print("今日無符合資料。")
         return
 
     df = pd.DataFrame(all_raw_data)
+    
+    # 1. 轉換日期格式以便排序 (由新到舊)
+    df['日期_tmp'] = pd.to_datetime(df['日期'].str.extract(r'(\d{4}/\d{1,2}/\d{1,2})')[0], errors='coerce')
+    df = df.sort_values(by='日期_tmp', ascending=False)
+    
+    # 2. 去除重複
     df = df.drop_duplicates(subset=['內容'], keep='first').reset_index(drop=True)
+    
+    # 3. 移除暫時欄位
+    df = df.drop(columns=['日期_tmp'])
+    
     total_bids = len(df)
-    print(f"搜尋結束，共找到 {total_bids} 筆不重複標案。")
+    print(f"搜尋結束，共找到 {total_bids} 筆資料（已按日期排序）。")
 
     # 【第三步：分批發送 LINE (這段必須在關鍵字迴圈外面)】
     line_token = os.environ.get("LINE_TOKEN")
