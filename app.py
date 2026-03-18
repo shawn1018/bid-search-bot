@@ -21,14 +21,14 @@ async def search_keyword_async(keyword):
             # 發送請求
             resp = await client.post(url, data=data, headers=headers, timeout=15.0)
             
-            # 【關鍵】：強制使用 utf-8 解碼，解決所有的問號亂碼
+            # 【UTF-8 解碼】：解決問號亂碼
             resp.encoding = 'utf-8'
             
-            # 使用 BeautifulSoup 解析 HTML，把雜亂的標籤清掉
+            # 使用 BeautifulSoup 解析 HTML
             soup = BeautifulSoup(resp.text, 'html.parser')
             
             results =[]
-            # 根據截圖，標案通常在 <li> 或 <tr> (表格行) 裡面
+            # 標案通常在 <li> 或 <tr> 裡面
             blocks = soup.find_all(['tr', 'li'])
             
             # 正規表達式：抓取 "1. 機關:名稱 (日期)"
@@ -38,7 +38,7 @@ async def search_keyword_async(keyword):
                 # 取得乾淨的文字，並把多餘的換行空白拿掉
                 text = block.get_text(separator=" ").strip()
                 
-                # 過濾：必須包含年份(202)，過濾掉版權宣告，且長度必須在 10 到 300 字之間 (排除幾千字的導覽列)
+                # 過濾：必須包含年份(202)，過濾掉版權宣告，且長度必須在 10 到 300 字之間
                 if "202" in text and "Copyright" not in text and 10 < len(text) < 300:
                     match = pattern.search(text)
                     if match:
@@ -48,7 +48,6 @@ async def search_keyword_async(keyword):
                             '日期': match.group(3).strip(),
                             '關鍵字': keyword
                         })
-                        
             return results
             
         except Exception as e:
@@ -59,7 +58,7 @@ async def search_keyword_async(keyword):
 st.set_page_config(page_title="標案搜尋系統", layout="wide")
 st.title("🚀 標案自動化搜尋系統")
 
-# 初始化 Session State，用來記憶搜尋結果
+# 初始化 Session State，用來記憶搜尋結果，防止畫面刷新資料不見
 if "df" not in st.session_state:
     st.session_state.df = None
 
@@ -78,7 +77,8 @@ if st.button("開始搜尋"):
             
             all_data =[]
             for kw in keywords:
-                data = loop.loop.run_until_complete(search_keyword_async(kw))
+                # 【修正】：這裡改為 loop.run_until_complete
+                data = loop.run_until_complete(search_keyword_async(kw))
                 all_data.extend(data)
                 
         if all_data:
@@ -89,7 +89,7 @@ if st.button("開始搜尋"):
             df = df.reset_index(drop=True)
             df['序號'] = df.index + 1
             
-            # 將結果存入暫存，這樣按其他按鈕時畫面才不會不見
+            # 將結果存入暫存
             st.session_state.df = df
         else:
             st.session_state.df = pd.DataFrame() # 存入空表格代表沒資料
@@ -117,7 +117,7 @@ if st.session_state.df is not None and not st.session_state.df.empty:
     st.subheader("🤖 一鍵發送至 LINE 機器人")
     
     # 讓使用者輸入兩把鑰匙
-    line_token = st.text_input("請輸入 Channel Access Token:", type="password")
+    line_token = st.text_input("請輸入 Channel Access Token (長亂碼):", type="password")
     user_id = st.text_input("請輸入你的 User ID (U開頭):", type="password")
     
     if st.button("🚀 傳送標案結果到我的 LINE"):
@@ -151,7 +151,7 @@ if st.session_state.df is not None and not st.session_state.df.empty:
             }
             
             try:
-                # 使用 httpx 的同步模式發送請求
+                # 使用 httpx 的同步模式發送請求給 LINE
                 with httpx.Client() as client:
                     r = client.post(url, headers=headers, json=payload)
                     if r.status_code == 200:
