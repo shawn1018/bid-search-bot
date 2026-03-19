@@ -23,22 +23,48 @@ def get_initial_keywords_from_file():
     except:
         return "文物\n整飭\n書畫"
 
-# --- 3. 同步版：搜尋官方連結與 AI 摘要 ---
-def ai_analyze_tender_sync(tender_name):
+# --- 3. 強化版：搜尋官方連結 ---
+def find_official_url(tender_name):
+    """優化過的搜尋邏輯：自動過濾機關名稱並嘗試多次搜尋"""
     try:
-        # 搜尋官方網址
-        official_url = None
-        with DDGS() as ddgs:
-            query = f"{tender_name} site:web.pcc.gov.tw"
-            results = list(ddgs.text(query, max_results=3))
-            if results:
-                official_url = results[0]['href']
+        # 處理標案名稱：去掉機關名稱 (處理半形與全形冒號)
+        clean_name = tender_name
+        if ":" in tender_name:
+            clean_name = tender_name.split(":", 1)[1]
+        elif "：" in tender_name:
+            clean_name = tender_name.split("：", 1)[1]
+            
+        search_query = clean_name.strip()
         
-        if not official_url:
-            return f"❌ 無法找到「{tender_name}」的官方公開網頁。"
+        with DDGS() as ddgs:
+            # 策略 A：精準搜尋官方網站
+            query_a = f'"{search_query}" site:web.pcc.gov.tw'
+            results = list(ddgs.text(query_a, max_results=3))
+            
+            if not results:
+                # 策略 B：放寬條件，搜尋全網但包含官方關鍵字
+                query_b = f'{search_query} 政府電子採購網'
+                results = list(ddgs.text(query_b, max_results=5))
+            
+            if results:
+                # 檢查結果中是否有 web.pcc.gov.tw 的連結
+                for r in results:
+                    if "web.pcc.gov.tw" in r.get('href', ''):
+                        return r['href']
+                # 如果前幾個都沒有官方連結，就回傳第一個搜尋結果
+                return results[0]['href']
+    except Exception as e:
+        print(f"搜尋引擎出錯: {e}")
+    return None
 
-        # 抓取內容 (同步模式)
-        headers = {"User-Agent": "Mozilla/5.0"}
+# --- 4. 同步版：AI 抓取與摘要 ---
+def ai_analyze_tender_sync(tender_name):
+    official_url = find_official_url(tender_name)
+    if not official_url:
+        return f"❌ 無法在全網找到「{tender_name}」的官方公開網頁。建議手動至政府電子採購網查詢。"
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
         with httpx.Client() as client:
             resp = client.get(official_url, headers=headers, timeout=15.0)
             resp.encoding = 'utf-8'
@@ -46,18 +72,24 @@ def ai_analyze_tender_sync(tender_name):
             raw_text = soup.get_text(separator=" ", strip=True)
             
             prompt = f"""
-            你是一位專業的政府標案分析官。請為我摘要以下內容：
+            你是一位專業的政府標案分析官。請閱讀以下來自『政府電子採購網』的公開資訊，為我整理標案重點：
             標案名稱：{tender_name}
             原始內容：{raw_text[:4000]}
-            摘要要求：1.預算金額 2.截標時間 3.資格要求 4.工作重點 5.AI建議。
-            使用繁體中文 Markdown。
+            
+            請依序摘要：
+            1. **預算金額** (若有提到)
+            2. **截標日期與時間**
+            3. **廠商投標資格關鍵要求**
+            4. **標案工作重點 (3點條列)**
+            5. **AI 建議 (投標風險或機會)**
+            使用繁體中文，Markdown 格式。
             """
             response = model.generate_content(prompt)
-            return f"🔗 **官方來源**: [點我開啟]({official_url})\n\n" + response.text
+            return f"🔗 **官方來源連結**: [點我開啟官網]({official_url})\n\n" + response.text
     except Exception as e:
         return f"AI 處理時出錯: {e}"
 
-# --- 4. 同步版：核心標案列表搜尋邏輯 ---
+# --- 5. 同步版：核心標案列表搜尋邏輯 ---
 def search_keyword_sync(keyword):
     url = "https://www.taiwanbuying.com.tw/Query_KeywordAction.ASP"
     headers = {
@@ -66,8 +98,8 @@ def search_keyword_sync(keyword):
     }
     data = {"txtKeyword": keyword, "keyword": keyword}
     
-    with httpx.Client() as client:
-        try:
+    try:
+        with httpx.Client() as client:
             resp = client.post(url, data=data, headers=headers, timeout=15.0)
             resp.encoding = 'utf-8'
             soup = BeautifulSoup(resp.text, 'html.parser')
@@ -77,7 +109,7 @@ def search_keyword_sync(keyword):
             
             for block in blocks:
                 text = block.get_text(separator=" ").strip()
-                if re.search(r'\d{4}/\d{1,2}/\d{1,2}', text) and "Copyright" not in text and 10 < len(text) < 300:
+                if "202" in text and "Copyright" not in text and 10 < len(text) < 300:
                     match = pattern.search(text)
                     if match:
                         results.append({
@@ -87,11 +119,11 @@ def search_keyword_sync(keyword):
                             '關鍵字': keyword
                         })
             return results
-        except Exception as e:
-            st.error(f"搜尋 '{keyword}' 錯誤: {e}")
-            return []
+    except Exception as e:
+        st.error(f"搜尋 '{keyword}' 錯誤: {e}")
+        return[]
 
-# --- 5. Streamlit 網頁介面 ---
+# --- 6. Streamlit 網頁介面 ---
 st.set_page_config(page_title="標案 AI 搜尋系統", layout="wide")
 st.title("🚀 標案 AI 自動化搜尋與智慧分析")
 
@@ -104,17 +136,18 @@ keywords_input = st.text_area("請輸入關鍵字 (一行一個):", value=init_k
 
 # --- 按鈕：開始搜尋 ---
 if st.button("🔍 開始搜尋並同步"):
-    keywords = [k.strip() for k in keywords_input.split('\n') if k.strip()]
+    keywords =[k.strip() for k in keywords_input.split('\n') if k.strip()]
     if keywords:
-        with st.spinner('正在從伺服器抓取資料...'):
-            all_data = []
+        with st.spinner('正在從伺服器抓取資料，請稍候...'):
+            all_data =[]
             for kw in keywords:
-                # 直接呼叫同步函數，不再需要 loop 或 await
+                # 徹底移除異步迴圈，使用穩定的同步呼叫
                 data = search_keyword_sync(kw)
                 all_data.extend(data)
                 
         if all_data:
             df = pd.DataFrame(all_data)
+            # 日期排序 (最新往舊)
             df['日期_tmp'] = pd.to_datetime(df['日期'].str.extract(r'(\d{4}/\d{1,2}/\d{1,2})')[0], errors='coerce')
             df = df.sort_values(by='日期_tmp', ascending=False)
             df = df.drop_duplicates(subset=['內容']).reset_index(drop=True)
@@ -125,43 +158,51 @@ if st.button("🔍 開始搜尋並同步"):
             st.session_state.df = None
             st.error("找不到符合條件的標案。")
 
-# --- 顯示結果與分析 ---
+# --- 顯示結果與 AI 分析功能 ---
 if st.session_state.df is not None and not st.session_state.df.empty:
     df = st.session_state.df
-    st.success(f"🎉 找到 {len(df)} 筆不重複標案。")
+    st.success(f"🎉 找到 {len(df)} 筆不重複標案 (已按日期由新到舊排序)。")
     st.dataframe(df, use_container_width=True)
 
     csv = df.to_csv(index=False).encode('utf-8-sig')
     st.download_button("📥 下載總匯總 (CSV)", csv, "標案匯總.csv", "text/csv")
 
     st.markdown("---")
+    
+    # AI 智慧分析區
     st.subheader("🧠 Gemini AI 標案智慧分析官")
-    selected_tender = st.selectbox("選擇要分析的標案:", options=df['內容'].tolist())
+    selected_tender = st.selectbox("請選擇想讓 AI 深度分析的標案:", options=df['內容'].tolist())
     
     if st.button("🚀 啟動 AI 全網搜尋與內容摘要"):
-        with st.spinner('AI 正在搜尋官網並分析中...'):
-            # 同樣改為同步呼叫
+        with st.spinner(f'AI 正在為您搜尋官網並讀取內容...'):
             analysis = ai_analyze_tender_sync(selected_tender)
             st.markdown(analysis)
 
     st.markdown("---")
+    
+    # LINE 推播區
     st.subheader("🤖 LINE 群組一鍵推播")
     if st.button("🚀 傳送當前清單到 LINE 群組"):
         try:
             line_token = st.secrets["LINE_TOKEN"]
             user_id = st.secrets["USER_ID"]
+            
             msg = f"\n🔍 標案搜尋結果 (共 {len(df)} 筆)：\n" + "-"*15 + "\n"
             for _, row in df.head(15).iterrows():
                 msg += f"📌 {row['內容']}\n📅 {row['日期']} | 🔑 {row['關鍵字']}\n\n"
             
-            payload = {"to": user_id, "messages": [{"type": "text", "text": msg}]}
+            if len(df) > 15:
+                msg += f"...等其他 {len(df)-15} 筆，請至系統查看。"
+                
+            payload = {"to": user_id, "messages":[{"type": "text", "text": msg}]}
             headers = {"Authorization": f"Bearer {line_token}", "Content-Type": "application/json"}
             
-            # 使用同步的 httpx 傳送 LINE
             with httpx.Client() as client:
                 r = client.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload)
                 if r.status_code == 200:
-                    st.success("✅ 已傳送至 LINE 群組！")
+                    st.success("✅ 已成功傳送至 LINE 群組！")
                     st.balloons()
+                else:
+                    st.error(f"發送失敗: {r.text}")
         except:
-            st.error("請檢查 Streamlit Secrets 中的 LINE 設定。")
+            st.error("❌ 請檢查 Streamlit Secrets 中的 LINE 設定 (LINE_TOKEN 與 USER_ID)。")
