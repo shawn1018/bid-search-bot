@@ -5,14 +5,14 @@ import re
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 
-# --- 1. 配置 Gemini AI (啟用 Google 搜尋連動功能) ---
+# --- 1. 配置 Gemini AI (修正 Google Search Tool 名稱) ---
 try:
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        # 【關鍵改進】：啟動 Google 搜尋工具
+        # 【修正點】：將 google_search_retrieval 改為 google_search
         model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',
-            tools=[{'google_search_retrieval': {}}] 
+            tools=[{"google_search": {}}] 
         )
     else:
         st.sidebar.warning("⚠️ 未設定 GEMINI_API_KEY")
@@ -28,11 +28,8 @@ def get_initial_keywords_from_file():
     except:
         return "文物\n整飭\n書畫"
 
-# --- 3. AI 智慧分析函數 (改為調用 Google 搜尋引擎) ---
+# --- 3. AI 智慧分析函數 (調用修正後的 Google 搜尋) ---
 def ai_analyze_tender_with_google_search(tender_name):
-    # 清理標案名稱
-    clean_name = tender_name.split(":")[-1].split("：")[-1].strip()
-    
     prompt = f"""
     請使用 Google 搜尋引擎搜尋並分析以下台灣政府標案：
     標案名稱：「{tender_name}」
@@ -40,7 +37,7 @@ def ai_analyze_tender_with_google_search(tender_name):
     請為我整理出該標案最準確的資訊：
     1. **預算金額** (請務必查出具體新台幣金額)
     2. **截標與開標時間** (包含日期與精確時間)
-    3. **標案案號** (若有)
+    3. **標案案號**
     4. **案件背景與脈絡** (包含相關新聞背景或捐贈資訊)
     5. **廠商投標資格關鍵要求**
     6. **標案工作重點 (3點核心重點條列)**
@@ -50,19 +47,24 @@ def ai_analyze_tender_with_google_search(tender_name):
     """
     
     try:
-        # 讓 Gemini 自己去 Google 搜尋資料，不需要我們動手抓網頁
+        # 執行生成
         response = model.generate_content(prompt)
         
-        # 取得資料來源連結 (如果有)
-        source_links = "\n\n--- \n📚 **資料參考來源：**\n"
-        if response.candidates[0].grounding_metadata.search_entry_point:
-            source_links += response.candidates[0].grounding_metadata.search_entry_point.rendered_content
-        
-        return response.text + source_links
+        # 嘗試取得搜尋來源資訊
+        source_info = ""
+        try:
+            if hasattr(response.candidates[0], 'grounding_metadata'):
+                metadata = response.candidates[0].grounding_metadata
+                if hasattr(metadata, 'search_entry_point') and metadata.search_entry_point:
+                    source_info = "\n\n--- \n📚 **資料參考來源：**\n" + metadata.search_entry_point.rendered_content
+        except:
+            pass
+            
+        return response.text + source_info
     except Exception as e:
         return f"AI 搜尋分析時發生錯誤: {e}"
 
-# --- 4. 核心標案列表搜尋邏輯 (維持穩定) ---
+# --- 4. 核心標案列表搜尋邏輯 ---
 def search_keyword_sync(keyword):
     url = "https://www.taiwanbuying.com.tw/Query_KeywordAction.ASP"
     headers = {
@@ -94,7 +96,7 @@ def search_keyword_sync(keyword):
         return []
 
 # --- 5. Streamlit 網頁介面 ---
-st.set_page_config(page_title="標案 AI 搜尋系統 (Google 搜尋版)", layout="wide")
+st.set_page_config(page_title="標案 AI 搜尋系統", layout="wide")
 st.title("🚀 標案 AI 搜尋與 Google 實時分析系統")
 
 if "df" not in st.session_state:
@@ -131,12 +133,11 @@ if st.session_state.df is not None:
 
     st.markdown("---")
     st.subheader("🧠 Gemini 2.0 × Google 實時搜尋分析")
-    st.write("此功能將連動 Google 搜尋引擎，查出最精確的預算、日期與背景。")
+    st.write("連動 Google 搜尋引擎，精確查出標案細節。")
     selected_tender = st.selectbox("選擇要分析的標案:", options=df['內容'].tolist())
     
     if st.button("🚀 執行 Google 實時分析 (含預算查詢)"):
-        with st.spinner('Gemini 正在使用 Google 搜尋引擎查閱全網資料中...'):
-            # 直接呼叫最新的 Google 搜尋連動函數
+        with st.spinner('Gemini 正在調用 Google 搜尋引擎分析中...'):
             analysis = ai_analyze_tender_with_google_search(selected_tender)
             st.markdown(analysis)
 
