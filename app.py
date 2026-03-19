@@ -11,7 +11,7 @@ try:
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         # 使用 Google 最新發佈的 gemini-2.0-flash 模型
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
     else:
         st.sidebar.warning("⚠️ 未設定 GEMINI_API_KEY")
 except Exception as e:
