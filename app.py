@@ -5,19 +5,28 @@ import re
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 
-# --- 1. 配置 Gemini AI (全域宣告) ---
-model = None  # 先初始化為 None
+# --- 1. 配置 Gemini AI ---
+model = None
 
 try:
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        # 使用 google_search 工具
-        model = genai.GenerativeModel(
-            model_name='gemini-2.0-flash',
-            tools=[{"google_search": {}}] 
-        )
+        
+        # 這裡改用最新的工具宣告方式
+        # 如果 google_search 報錯，這代表環境中的套件版本太舊
+        try:
+            model = genai.GenerativeModel(
+                model_name='gemini-2.0-flash',
+                tools=[{"google_search": {}}] 
+            )
+        except Exception:
+            # 備用方案：如果新版名稱失敗，嘗試舊版名稱
+            model = genai.GenerativeModel(
+                model_name='gemini-2.0-flash',
+                tools=[{"google_search_retrieval": {}}]
+            )
     else:
-        st.sidebar.warning("⚠️ 未設定 GEMINI_API_KEY，AI 分析功能將無法使用。")
+        st.sidebar.warning("⚠️ 未設定 GEMINI_API_KEY")
 except Exception as e:
     st.sidebar.error(f"AI 配置失敗: {e}")
 
@@ -32,18 +41,20 @@ def get_initial_keywords_from_file():
 
 # --- 3. AI 智慧分析函數 ---
 def ai_analyze_tender_with_google_search(tender_name):
-    # 檢查 model 是否已定義
     if model is None:
-        return "❌ AI 模型尚未初始化，請檢查 Streamlit Secrets 中的 API Key 設定。"
+        return "❌ AI 模型尚未初始化，請檢查 Secrets 設定。"
+
+    # 清理名稱以便搜尋更準確
+    clean_name = tender_name.split(":")[-1].split("：")[-1].strip()
 
     prompt = f"""
-    請使用 Google 搜尋引擎搜尋並分析以下台灣政府標案：
+    請使用 Google 搜尋引擎搜尋並詳細分析以下台灣政府標案：
     標案名稱：「{tender_name}」
     
     請為我整理出該標案最準確的資訊：
     1. **預算金額** (請務必查出具體新台幣金額)
     2. **截標與開標時間** (包含日期與精確時間)
-    3. **標案案號**
+    3. **標案案號** (若有)
     4. **案件背景與脈絡** (包含相關新聞背景或捐贈資訊)
     5. **廠商投標資格關鍵要求**
     6. **標案工作重點 (3點核心重點條列)**
@@ -53,13 +64,12 @@ def ai_analyze_tender_with_google_search(tender_name):
     """
     
     try:
-        # 執行 AI 生成
+        # 執行生成
         response = model.generate_content(prompt)
         
-        # 嘗試取得搜尋來源資訊
+        # 嘗試處理來源連結 (Grounding Metadata)
         source_info = ""
         try:
-            # 檢查是否有 Grounding 資料 (Google 搜尋來源)
             if response.candidates[0].grounding_metadata:
                 metadata = response.candidates[0].grounding_metadata
                 if hasattr(metadata, 'search_entry_point') and metadata.search_entry_point:
@@ -69,7 +79,7 @@ def ai_analyze_tender_with_google_search(tender_name):
             
         return response.text + source_info
     except Exception as e:
-        return f"AI 搜尋分析時發生錯誤: {e}"
+        return f"AI 搜尋分析時發生錯誤: {e}\n(提示：這通常是因為 API Key 權限或地區限制導致 Google 搜尋功能暫時無法使用)"
 
 # --- 4. 核心標案列表搜尋邏輯 ---
 def search_keyword_sync(keyword):
@@ -106,7 +116,6 @@ def search_keyword_sync(keyword):
 st.set_page_config(page_title="標案 AI 搜尋系統", layout="wide")
 st.title("🚀 標案 AI 搜尋與 Google 實時分析系統")
 
-# 初始化 Session State
 if "df" not in st.session_state:
     st.session_state.df = None
 
@@ -123,7 +132,6 @@ if st.button("🔍 開始搜尋並同步"):
                 all_data.extend(data)
         if all_data:
             df = pd.DataFrame(all_data)
-            # 依日期最新往舊排序
             df['日期_tmp'] = pd.to_datetime(df['日期'].str.extract(r'(\d{4}/\d{1,2}/\d{1,2})')[0], errors='coerce')
             df = df.sort_values(by='日期_tmp', ascending=False)
             df = df.drop_duplicates(subset=['內容']).reset_index(drop=True)
@@ -165,7 +173,7 @@ if st.session_state.df is not None:
             with httpx.Client() as client:
                 r = client.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload)
                 if r.status_code == 200:
-                    st.success("✅ 已成功傳送至 LINE！")
+                    st.success("✅ 已傳送至 LINE")
                     st.balloons()
                 else:
                     st.error(f"發送失敗: {r.text}")
