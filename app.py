@@ -12,25 +12,18 @@ try:
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # 【核心對策】：使用 Try-Except 雙重嘗試，解決 SDK 版本與工具名稱不相容問題
-        try:
-            # 優先嘗試最新標準格式
-            model = genai.GenerativeModel(
-                model_name='gemini-2.5-flash',
-                tools=[{"google_search": {}}] 
-            )
-        except Exception:
-            # 備用方案：若 google_search 報錯，回退至 google_search_retrieval 格式
-            model = genai.GenerativeModel(
-                model_name='gemini-2.5-flash',
-                tools=[{"google_search_retrieval": {}}]
-            )
+        # 根據伺服器要求，強制使用 'google_search'
+        # 請確保 requirements.txt 中的 google-generativeai 版本足夠新
+        model = genai.GenerativeModel(
+            model_name='gemini-2.5-flash',
+            tools=[{"google_search": {}}] 
+        )
     else:
         st.sidebar.warning("⚠️ 未設定 GEMINI_API_KEY")
 except Exception as e:
     st.sidebar.error(f"AI 配置失敗: {e}")
 
-# --- 2. 自動同步關鍵字邏輯 (與 keywords.txt 同步) ---
+# --- 2. 自動同步關鍵字邏輯 ---
 def get_initial_keywords_from_file():
     filename = "keywords.txt"
     try:
@@ -40,7 +33,7 @@ def get_initial_keywords_from_file():
     except:
         return "文物\n整飭\n書畫"
 
-# --- 3. AI 智慧分析函數 (調用 Google 搜尋引擎) ---
+# --- 3. AI 智慧分析函數 ---
 def ai_analyze_tender_with_google_search(tender_name):
     if model is None:
         return "❌ AI 模型尚未初始化，請檢查 Secrets 設定。"
@@ -52,8 +45,8 @@ def ai_analyze_tender_with_google_search(tender_name):
     請利用你的 Grounding 能力，為我整理出該標案最精確的內容：
     1. **預算金額** (請務必查出具體新台幣金額)
     2. **截標與開標日期時間**
-    3. **標案案號** (若有)
-    4. **案件背景與詳細脈絡** (包含新聞、捐贈背景或機關說明)
+    3. **標案案號**
+    4. **案件背景與詳細脈絡**
     5. **廠商投標資格關鍵要求**
     6. **標案工作重點 (3點核心條列)**
     7. **AI 商業評估** (包含風險評估或商機建議)
@@ -65,7 +58,7 @@ def ai_analyze_tender_with_google_search(tender_name):
         # 執行生成
         response = model.generate_content(prompt)
         
-        # 取得資料來源連結
+        # 提取資料來源
         source_info = ""
         try:
             if hasattr(response.candidates[0], 'grounding_metadata'):
@@ -79,7 +72,7 @@ def ai_analyze_tender_with_google_search(tender_name):
     except Exception as e:
         return f"AI 搜尋分析時發生錯誤: {e}"
 
-# --- 4. 核心標案列表搜尋邏輯 (同步穩定版) ---
+# --- 4. 核心標案列表搜尋邏輯 ---
 def search_keyword_sync(keyword):
     url = "https://www.taiwanbuying.com.tw/Query_KeywordAction.ASP"
     headers = {
@@ -117,21 +110,20 @@ st.title("🚀 標案 AI 搜尋與 Google 2.5 實時分析")
 if "df" not in st.session_state:
     st.session_state.df = None
 
-# 初始化關鍵字 (同步讀取 GitHub keywords.txt)
+# 初始化關鍵字
 init_kw = get_initial_keywords_from_file()
 keywords_input = st.text_area("🔧 管理關鍵字:", value=init_kw, height=150)
 
 if st.button("🔍 開始搜尋並同步清單"):
     keywords = [k.strip() for k in keywords_input.split('\n') if k.strip()]
     if keywords:
-        with st.spinner('📡 正在抓取最新標案清單...'):
+        with st.spinner('📡 正在從伺服器抓取最新標案清單...'):
             all_data = []
             for kw in keywords:
                 data = search_keyword_sync(kw)
                 all_data.extend(data)
         if all_data:
             df = pd.DataFrame(all_data)
-            # 依日期最新往舊排序
             df['日期_tmp'] = pd.to_datetime(df['日期'].str.extract(r'(\d{4}/\d{1,2}/\d{1,2})')[0], errors='coerce')
             df = df.sort_values(by='日期_tmp', ascending=False)
             df = df.drop_duplicates(subset=['內容']).reset_index(drop=True)
@@ -158,7 +150,7 @@ if st.session_state.df is not None:
             st.markdown(analysis)
 
     st.markdown("---")
-    st.subheader("🤖 LINE 群組一鍵推播")
+    st.subheader("🤖 LINE 推播")
     if st.button("🚀 傳送清單到 LINE 群組"):
         try:
             line_token = st.secrets["LINE_TOKEN"]
@@ -173,7 +165,6 @@ if st.session_state.df is not None:
                 r = client.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload)
                 if r.status_code == 200:
                     st.success("✅ 已傳送至 LINE")
-                    st.balloons()
                 else:
                     st.error(f"發送失敗: {r.text}")
         except:
