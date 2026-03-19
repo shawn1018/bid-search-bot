@@ -16,7 +16,7 @@ try:
         # 如果 google_search 報錯，這代表環境中的套件版本太舊
         try:
             model = genai.GenerativeModel(
-                model_name='gemini-2.0-flash',
+                model_name='gemini-2.5-flash',
                 tools=[{"google_search": {}}] 
             )
         except Exception:
