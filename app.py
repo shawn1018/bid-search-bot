@@ -23,41 +23,69 @@ def get_initial_keywords_from_file():
     except:
         return "文物\n整飭\n書畫"
 
-def find_official_url(tender_name):
-    """優化過的搜尋邏輯：嚴格確保只抓取 pcc.gov.tw 的網址"""
+# --- 4. 同步版：AI 全網情報抓取與摘要 ---
+def ai_analyze_tender_sync(tender_name):
+    # 1. 嘗試尋找官方網址
+    official_url = find_official_url(tender_name)
+    
+    # 2. 無論找不找得到官方網址，我們都去全網搜尋這個標案的「新聞與第三方資料」
+    web_snippets = ""
     try:
-        # 去掉機關名稱
-        clean_name = tender_name
-        if ":" in tender_name:
-            clean_name = tender_name.split(":", 1)[1]
-        elif "：" in tender_name:
-            clean_name = tender_name.split("：", 1)[1]
-            
-        # 清除特殊符號
-        clean_name = re.sub(r'[^\w\u4e00-\u9fa5]', ' ', clean_name).strip()
-        
         with DDGS() as ddgs:
-            # 策略 A：精準搜尋政府電子採購網
-            query_a = f'"{clean_name}" site:web.pcc.gov.tw'
-            results = list(ddgs.text(query_a, max_results=5))
+            # 去掉機關名稱，只搜案名
+            clean_name = tender_name
+            if ":" in tender_name:
+                clean_name = tender_name.split(":", 1)[1]
+            elif "：" in tender_name:
+                clean_name = tender_name.split("：", 1)[1]
             
-            if not results:
-                # 策略 B：放寬字數，但依然鎖定 pcc.gov.tw 網域
-                short_name = clean_name[:15]
-                query_b = f'{short_name} site:pcc.gov.tw'
-                results = list(ddgs.text(query_b, max_results=5))
-            
-            if results:
-                # 【嚴格檢查】：網址裡面一定要有 pcc.gov.tw 才准回傳！
-                for r in results:
-                    if "pcc.gov.tw" in r.get('href', ''):
-                        return r['href']
-                
-                # 如果找了一圈都沒有政府網站，直接回傳 None (讓它進入 AI 盲測模式)
-                return None
+            # 搜尋全網前 5 筆摘要
+            results = list(ddgs.text(clean_name.strip(), max_results=5))
+            for r in results:
+                web_snippets += f"來源: {r.get('title', '')}\n摘要: {r.get('body', '')}\n\n"
     except Exception as e:
-        print(f"搜尋引擎出錯: {e}")
-    return None
+        print(f"全網搜尋失敗: {e}")
+
+    # 3. 如果有官方網址，嘗試抓取原始碼
+    raw_text = ""
+    if official_url:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        try:
+            with httpx.Client() as client:
+                resp = client.get(official_url, headers=headers, timeout=15.0)
+                resp.encoding = 'utf-8'
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                raw_text = soup.get_text(separator=" ", strip=True)[:4000]
+        except:
+            pass
+
+    # 4. 組合情報，送給 Gemini 進行深度分析
+    prompt = f"""
+    你是一位專業的政府標案分析官。我為你搜集了關於標案「{tender_name}」的網路新聞、第三方採購網摘要與官方內容：
+    
+    【全網搜尋情報摘要】：
+    {web_snippets if web_snippets else "無網路情報"}
+    
+    【官方網頁原始內容】：
+    {raw_text if raw_text else "無官方內容"}
+    
+    請綜合以上所有資料（若官方資料不足，請參考網路情報；若兩者皆無，請憑藉你的專業知識推測），為我整理出此標案的重點：
+    1. **預算金額** (若資料中有提到)
+    2. **截標與開標時間**
+    3. **案件背景與脈絡** (若有相關新聞背景)
+    4. **廠商投標資格關鍵要求**
+    5. **標案工作重點**
+    6. **目前進度與 AI 建議**
+    
+    請使用繁體中文，Markdown 格式回覆。若搜集到的資料中完全未提及某項，請說明「目前公開資料未提及」。
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        prefix = f"🔗 **官方來源連結**:[點我開啟]({official_url})\n\n" if official_url else "⚠️ **注意：搜尋引擎尚未收錄官方網頁，以下為全網第三方資料與 AI 綜合分析。**\n\n"
+        return prefix + response.text
+    except Exception as e:
+        return f"AI 處理時出錯: {e}"
 
 # --- 4. 同步版：AI 抓取與摘要 ---
 def ai_analyze_tender_sync(tender_name):
