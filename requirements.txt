@@ -2,4 +2,7 @@ streamlit
 pandas
 httpx
 beautifulsoup4
+nest_asyncio
+google-generativeai
 duckduckgo_search
+xlsxwriter
