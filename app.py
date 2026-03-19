@@ -10,7 +10,7 @@ import google.generativeai as genai
 try:
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
 except Exception as e:
     st.sidebar.error(f"AI 配置失敗: {e}")
 
