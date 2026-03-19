@@ -2,3 +2,4 @@ streamlit
 pandas
 httpx
 beautifulsoup4
+duckduckgo_search
