@@ -23,36 +23,38 @@ def get_initial_keywords_from_file():
     except:
         return "文物\n整飭\n書畫"
 
-# --- 3. 強化版：搜尋官方連結 ---
 def find_official_url(tender_name):
-    """優化過的搜尋邏輯：自動過濾機關名稱並嘗試多次搜尋"""
+    """優化過的搜尋邏輯：嚴格確保只抓取 pcc.gov.tw 的網址"""
     try:
-        # 處理標案名稱：去掉機關名稱 (處理半形與全形冒號)
+        # 去掉機關名稱
         clean_name = tender_name
         if ":" in tender_name:
             clean_name = tender_name.split(":", 1)[1]
         elif "：" in tender_name:
             clean_name = tender_name.split("：", 1)[1]
             
-        search_query = clean_name.strip()
+        # 清除特殊符號
+        clean_name = re.sub(r'[^\w\u4e00-\u9fa5]', ' ', clean_name).strip()
         
         with DDGS() as ddgs:
-            # 策略 A：精準搜尋官方網站
-            query_a = f'"{search_query}" site:web.pcc.gov.tw'
-            results = list(ddgs.text(query_a, max_results=3))
+            # 策略 A：精準搜尋政府電子採購網
+            query_a = f'"{clean_name}" site:web.pcc.gov.tw'
+            results = list(ddgs.text(query_a, max_results=5))
             
             if not results:
-                # 策略 B：放寬條件，搜尋全網但包含官方關鍵字
-                query_b = f'{search_query} 政府電子採購網'
+                # 策略 B：放寬字數，但依然鎖定 pcc.gov.tw 網域
+                short_name = clean_name[:15]
+                query_b = f'{short_name} site:pcc.gov.tw'
                 results = list(ddgs.text(query_b, max_results=5))
             
             if results:
-                # 檢查結果中是否有 web.pcc.gov.tw 的連結
+                # 【嚴格檢查】：網址裡面一定要有 pcc.gov.tw 才准回傳！
                 for r in results:
-                    if "web.pcc.gov.tw" in r.get('href', ''):
+                    if "pcc.gov.tw" in r.get('href', ''):
                         return r['href']
-                # 如果前幾個都沒有官方連結，就回傳第一個搜尋結果
-                return results[0]['href']
+                
+                # 如果找了一圈都沒有政府網站，直接回傳 None (讓它進入 AI 盲測模式)
+                return None
     except Exception as e:
         print(f"搜尋引擎出錯: {e}")
     return None
