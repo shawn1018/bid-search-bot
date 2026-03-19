@@ -3,23 +3,8 @@ import pandas as pd
 import httpx
 import re
 from bs4 import BeautifulSoup
-import google.generativeai as genai
 
-# --- 1. 配置 Gemini AI (2026 最新版: Gemini 2.5 Flash) ---
-model = None
-
-try:
-    if "GEMINI_API_KEY" in st.secrets:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        
-        # 【關鍵修正】：這裡單純宣告模型，不要放 tools 參數，避開初始化報錯
-        model = genai.GenerativeModel(model_name='gemini-2.5-flash')
-    else:
-        st.sidebar.warning("⚠️ 未設定 GEMINI_API_KEY")
-except Exception as e:
-    st.sidebar.error(f"AI 配置失敗: {e}")
-
-# --- 2. 自動同步關鍵字邏輯 ---
+# --- 1. 自動同步關鍵字邏輯 ---
 def get_initial_keywords_from_file():
     filename = "keywords.txt"
     try:
@@ -29,47 +14,68 @@ def get_initial_keywords_from_file():
     except:
         return "文物\n整飭\n書畫"
 
-# --- 3. AI 智慧分析函數 ---
+# --- 2. AI 智慧分析函數 (★ 直接使用 REST API，徹底避開套件報錯) ---
 def ai_analyze_tender_with_google_search(tender_name):
-    if model is None:
-        return "❌ AI 模型尚未初始化，請檢查 Secrets 設定。"
+    # 檢查金鑰
+    api_key = st.secrets.get("GEMINI_API_KEY")
+    if not api_key:
+        return "❌ 未設定 GEMINI_API_KEY，請檢查 Streamlit Secrets。"
+
+    clean_name = tender_name.split(":")[-1].split("：")[-1].strip()
 
     prompt = f"""
     請使用 Google 搜尋引擎詳細搜尋並專業分析以下台灣政府標案：
     標案名稱：「{tender_name}」
     
     請利用你的 Grounding 能力，為我整理出該標案最精確的內容：
-    1. **預算金額** (請務必查出具體新台幣金額)
+    1. **預算金額** (請務必查出具體新台幣金額，若無公開請說明)
     2. **截標與開標日期時間**
-    3. **標案案號**
-    4. **案件背景與詳細脈絡** (包含相關新聞報導、捐贈資訊或機關歷史)
+    3. **標案案號** (若有)
+    4. **案件背景與詳細脈絡** (包含新聞、捐贈背景或機關說明)
     5. **廠商投標資格關鍵要求**
-    6. **標案工作重點 (3點核心重點條列)**
-    7. **AI 商業評估** (包含投標風險或商機價值建議)
+    6. **標案工作重點 (3點核心條列)**
+    7. **AI 商業評估** (包含風險評估或商機建議)
     
     請使用『繁體中文』，以專業 Markdown 格式回覆。
     """
     
+    # 直接呼叫 Google 的底層 API，繞過所有 Python 套件的語法限制
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    
+    # 這是最標準、絕不報錯的 Google Search 連動格式
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "tools": [{"googleSearch": {}}]
+    }
+    
     try:
-        # 【關鍵修正】：在發送請求時，直接傳入字串 'google_search'
-        # 這樣 SDK 就絕對不會把它誤判為「自定義函數字典」了
-        response = model.generate_content(prompt, tools='google_search')
-        
-        # 提取 Google 搜尋來源
-        source_info = ""
-        try:
-            if hasattr(response.candidates[0], 'grounding_metadata'):
-                metadata = response.candidates[0].grounding_metadata
-                if hasattr(metadata, 'search_entry_point') and metadata.search_entry_point:
-                    source_info = "\n\n--- \n📚 **資料參考來源 (Google Search)：**\n" + metadata.search_entry_point.rendered_content
-        except:
-            pass
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(url, json=payload)
             
-        return response.text + source_info
+            if resp.status_code != 200:
+                return f"❌ Google API 伺服器錯誤: {resp.status_code}\n{resp.text}"
+                
+            data = resp.json()
+            
+            # 解析 AI 回答
+            candidate = data.get("candidates", [{}])[0]
+            text_response = candidate.get("content", {}).get("parts", [{}])[0].get("text", "無法生成摘要。")
+            
+            # 提取 Google 搜尋來源網址 (Grounding Metadata)
+            source_info = ""
+            grounding = candidate.get("groundingMetadata", {})
+            entry_point = grounding.get("searchEntryPoint", {})
+            rendered_content = entry_point.get("renderedContent")
+            
+            if rendered_content:
+                source_info = "\n\n--- \n📚 **Google 實時搜尋來源：**\n" + rendered_content
+                
+            return text_response + source_info
+            
     except Exception as e:
-        return f"AI 搜尋分析時發生錯誤: {e}\n(可能原因：套件版本衝突或 Google API 連線問題)"
+        return f"API 請求時發生錯誤: {e}"
 
-# --- 4. 標案清單抓取邏輯 (同步穩定版) ---
+# --- 3. 核心標案列表搜尋邏輯 (穩定版) ---
 def search_keyword_sync(keyword):
     url = "https://www.taiwanbuying.com.tw/Query_KeywordAction.ASP"
     headers = {
@@ -78,8 +84,8 @@ def search_keyword_sync(keyword):
     }
     data = {"txtKeyword": keyword, "keyword": keyword}
     try:
-        with httpx.Client() as client:
-            resp = client.post(url, data=data, headers=headers, timeout=15.0)
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.post(url, data=data, headers=headers)
             resp.encoding = 'utf-8'
             soup = BeautifulSoup(resp.text, 'html.parser')
             results =[]
@@ -100,21 +106,20 @@ def search_keyword_sync(keyword):
     except:
         return[]
 
-# --- 5. Streamlit 網頁介面 ---
+# --- 4. Streamlit 網頁介面 ---
 st.set_page_config(page_title="標案 AI 搜尋系統 v2.5", layout="wide")
 st.title("🚀 標案 AI 搜尋與 Google 2.5 實時分析")
 
 if "df" not in st.session_state:
     st.session_state.df = None
 
-# 初始化關鍵字
 init_kw = get_initial_keywords_from_file()
-keywords_input = st.text_area("🔧 管理關鍵字 (修改後請按開始搜尋):", value=init_kw, height=150)
+keywords_input = st.text_area("🔧 管理關鍵字:", value=init_kw, height=150)
 
 if st.button("🔍 開始搜尋並同步清單"):
-    keywords =[k.strip() for k in keywords_input.split('\n') if k.strip()]
+    keywords = [k.strip() for k in keywords_input.split('\n') if k.strip()]
     if keywords:
-        with st.spinner('📡 正在從伺服器抓取最新標案清單...'):
+        with st.spinner('📡 正在抓取最新標案清單...'):
             all_data =[]
             for kw in keywords:
                 data = search_keyword_sync(kw)
@@ -131,7 +136,7 @@ if st.button("🔍 開始搜尋並同步清單"):
             st.session_state.df = None
             st.error("找不到符合條件的標案。")
 
-# --- 6. 顯示結果與 AI 分析功能 ---
+# --- 5. 顯示結果與 AI 分析功能 ---
 if st.session_state.df is not None:
     df = st.session_state.df
     st.success(f"✅ 找到 {len(df)} 筆標案。")
@@ -139,11 +144,11 @@ if st.session_state.df is not None:
 
     st.markdown("---")
     st.subheader("🧠 Gemini 2.5 × Google 實時深度分析")
-    st.write("利用最新 2.5 Flash 模型連動 Google 搜尋，查出標案背景與預算。")
+    st.write("繞過所有套件報錯，直接呼叫 Google API 查出標案背景與預算。")
     selected_tender = st.selectbox("請選擇想分析的標案:", options=df['內容'].tolist())
     
     if st.button("🚀 執行 AI 深度分析 (含全網預算查詢)"):
-        with st.spinner('Gemini 2.5 正在調用 Google 搜尋引擎分析中...'):
+        with st.spinner('Gemini 2.5 正在調用 Google 搜尋引擎分析中 (約需10秒)...'):
             analysis = ai_analyze_tender_with_google_search(selected_tender)
             st.markdown(analysis)
 
