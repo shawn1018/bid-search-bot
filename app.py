@@ -13,7 +13,7 @@ try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         # 使用 google_search 工具
         model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash',
+            model_name='gemini-2.0-flash',
             tools=[{"google_search": {}}] 
         )
     else:
