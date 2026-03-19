@@ -5,17 +5,19 @@ import re
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 
-# --- 1. 配置 Gemini AI (修正 Google Search Tool 名稱) ---
+# --- 1. 配置 Gemini AI (全域宣告) ---
+model = None  # 先初始化為 None
+
 try:
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        # 【修正點】：將 google_search_retrieval 改為 google_search
+        # 使用 google_search 工具
         model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',
             tools=[{"google_search": {}}] 
         )
     else:
-        st.sidebar.warning("⚠️ 未設定 GEMINI_API_KEY")
+        st.sidebar.warning("⚠️ 未設定 GEMINI_API_KEY，AI 分析功能將無法使用。")
 except Exception as e:
     st.sidebar.error(f"AI 配置失敗: {e}")
 
@@ -28,8 +30,12 @@ def get_initial_keywords_from_file():
     except:
         return "文物\n整飭\n書畫"
 
-# --- 3. AI 智慧分析函數 (調用修正後的 Google 搜尋) ---
+# --- 3. AI 智慧分析函數 ---
 def ai_analyze_tender_with_google_search(tender_name):
+    # 檢查 model 是否已定義
+    if model is None:
+        return "❌ AI 模型尚未初始化，請檢查 Streamlit Secrets 中的 API Key 設定。"
+
     prompt = f"""
     請使用 Google 搜尋引擎搜尋並分析以下台灣政府標案：
     標案名稱：「{tender_name}」
@@ -47,13 +53,14 @@ def ai_analyze_tender_with_google_search(tender_name):
     """
     
     try:
-        # 執行生成
+        # 執行 AI 生成
         response = model.generate_content(prompt)
         
         # 嘗試取得搜尋來源資訊
         source_info = ""
         try:
-            if hasattr(response.candidates[0], 'grounding_metadata'):
+            # 檢查是否有 Grounding 資料 (Google 搜尋來源)
+            if response.candidates[0].grounding_metadata:
                 metadata = response.candidates[0].grounding_metadata
                 if hasattr(metadata, 'search_entry_point') and metadata.search_entry_point:
                     source_info = "\n\n--- \n📚 **資料參考來源：**\n" + metadata.search_entry_point.rendered_content
@@ -99,6 +106,7 @@ def search_keyword_sync(keyword):
 st.set_page_config(page_title="標案 AI 搜尋系統", layout="wide")
 st.title("🚀 標案 AI 搜尋與 Google 實時分析系統")
 
+# 初始化 Session State
 if "df" not in st.session_state:
     st.session_state.df = None
 
@@ -115,6 +123,7 @@ if st.button("🔍 開始搜尋並同步"):
                 all_data.extend(data)
         if all_data:
             df = pd.DataFrame(all_data)
+            # 依日期最新往舊排序
             df['日期_tmp'] = pd.to_datetime(df['日期'].str.extract(r'(\d{4}/\d{1,2}/\d{1,2})')[0], errors='coerce')
             df = df.sort_values(by='日期_tmp', ascending=False)
             df = df.drop_duplicates(subset=['內容']).reset_index(drop=True)
@@ -133,10 +142,10 @@ if st.session_state.df is not None:
 
     st.markdown("---")
     st.subheader("🧠 Gemini 2.0 × Google 實時搜尋分析")
-    st.write("連動 Google 搜尋引擎，精確查出標案細節。")
+    st.write("連動 Google 搜尋引擎，精確查出標案細節（含預算）。")
     selected_tender = st.selectbox("選擇要分析的標案:", options=df['內容'].tolist())
     
-    if st.button("🚀 執行 Google 實時分析 (含預算查詢)"):
+    if st.button("🚀 執行 Google 實時分析"):
         with st.spinner('Gemini 正在調用 Google 搜尋引擎分析中...'):
             analysis = ai_analyze_tender_with_google_search(selected_tender)
             st.markdown(analysis)
@@ -156,7 +165,7 @@ if st.session_state.df is not None:
             with httpx.Client() as client:
                 r = client.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload)
                 if r.status_code == 200:
-                    st.success("✅ 已傳送至 LINE")
+                    st.success("✅ 已成功傳送至 LINE！")
                     st.balloons()
                 else:
                     st.error(f"發送失敗: {r.text}")
